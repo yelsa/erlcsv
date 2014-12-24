@@ -71,14 +71,14 @@ do_parse(<<>>, #ecsv{current_record=[],fold_state=State})->
 	State;
 %%EOF in the last line, add the last record and continue
 do_parse(<<>>,S)->
-	do_parse([],new_record(S));
+	do_parse(<<>>,new_record(S));
 
 %% skip carriage return (windows files uses CRLF)
 do_parse(<<$\r,Rest/binary>>,S = #ecsv{})->
 	do_parse(Rest,S);
 
 %% new record
-do_parse(<<$n,Rest/binary>>,S = #ecsv{}) ->
+do_parse(<<$\n,Rest/binary>>,S = #ecsv{}) ->
 	do_parse(Rest,new_record(S));
 
 do_parse(<<$, ,Rest/binary>>,S = #ecsv{current_field=Field,current_record=Record})->
@@ -111,3 +111,37 @@ new_record(S=#ecsv{cols=Cols,current_field=Field,current_record=Record,fold_stat
 		(tuple_size(NewRecord) =/= Cols) ->
 			throw({ecsv_exception,bad_record_size})
 	end.
+
+		%% ——– Regression tests ————————
+%% From the erl interpreter run csv:test() to run regression tests.
+%% See eunit for more information.
+-define(TEST,true).
+-ifdef(TEST).
+-include_lib("eunit/include/eunit.hrl").
+
+csv_test_() ->
+[% empty binary
+?_assertEqual([], parse(<<>>)),
+% Unix LF
+?_assertEqual([{"1A","1B","1C"},{"2A","2B","2C"}], parse(<<"1A,1B,1C\n2A,2B,2C">>)),
+% Unix LF with extra spaces after quoted element stripped
+?_assertEqual([{"1A","1B","1C"},{"2A","2B","2C"}], parse(<<"1A,\"1B\"  ,1C\n2A,2B,2C">>)),
+% Unix LF with extra spaces preserved in unquoted element
+?_assertEqual([{" 1A ","1B","1C"},{"2A","2B","2C"}], parse(<<" 1A ,1B,1C\n2A,2B,2C">>)),
+% Windows CRLF
+?_assertEqual([{"1A","1B","1C"},{"2A","2B","2C"}], parse(<<"1A,1B,1C\r\n2A,2B,2C">>)),
+% Quoted element
+?_assertEqual([{"1A","1B"}], parse(<<"1A,\"1B\"">>)),
+% Nested quoted element
+?_assertEqual([{"1A","\"1B\""}], parse(<<"1A,\"\"\"1B\"\"\"">>)),
+% Quoted element with embedded comma
+?_assertEqual([{"1A","1B, 1C"}], parse(<<"1A,\"1B, 1C\"">>)),
+% Quoted element with embedded LF
+?_assertEqual([{"1A","1\nB"}], parse(<<"1A,\"1\nB\"">>)),
+% Missing 2nd quote
+?_assertThrow({ecsv_exception,unclosed_quote}, parse(<<"1A,\"1B">>)),
+% Bad record size
+?_assertThrow({ecsv_exception,bad_record_size}, parse(<<"1A,1B,1C\n2A,2B">>))
+].
+
+-endif.
